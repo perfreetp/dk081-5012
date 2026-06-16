@@ -2,8 +2,13 @@ import { motion } from "framer-motion"
 import { useAppStore } from "@/store/useAppStore"
 import { Check } from "lucide-react"
 
-export function TodoList() {
-  const { todos, toggleTodo } = useAppStore()
+interface TodoListProps {
+  orderId: string
+}
+
+export function TodoList({ orderId }: TodoListProps) {
+  const { getTodosByOrder, toggleTodo } = useAppStore()
+  const todos = getTodosByOrder(orderId)
 
   if (todos.length === 0) return null
 
@@ -11,9 +16,8 @@ export function TodoList() {
   const totalCount = todos.length
 
   return (
-    <div className="card">
+    <div className="space-y-0">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="section-title mb-0">离校待办清单</h3>
         <span className="text-xs text-slate-400 font-mono">
           {doneCount}/{totalCount}
         </span>
@@ -31,7 +35,7 @@ export function TodoList() {
           <motion.button
             key={todo.id}
             whileTap={{ scale: 0.98 }}
-            onClick={() => toggleTodo(todo.id)}
+            onClick={() => toggleTodo(orderId, todo.id)}
             className={`flex items-center gap-3 w-full text-left py-2 px-1 rounded-lg transition-colors ${
               todo.done ? "opacity-50" : ""
             }`}

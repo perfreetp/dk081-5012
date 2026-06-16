@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { AlertTriangle, ChevronDown, Camera, Shield, Package, Plus, Trash2 } from "lucide-react"
+import { AlertTriangle, ChevronDown, Camera, Shield, Package, Plus, Trash2, Users } from "lucide-react"
 import type { Scenario, DeliveryMode, Difficulty, OrderItem } from "@/types"
 import { FURNITURE_TYPES, DIFFICULTY_LABELS, DELIVERY_LABELS } from "@/types"
 import { useAppStore } from "@/store/useAppStore"
@@ -14,7 +14,7 @@ const SA = { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit
 
 export default function PostPage() {
   const navigate = useNavigate()
-  const { addOrder, initTodos, currentUser } = useAppStore()
+  const { addOrder, initTodos, currentUser, setCurrentUserAdmin } = useAppStore()
   const [scenario, setScenario] = useState<Scenario | null>(null)
   const [selFurniture, setSelFurniture] = useState("")
   const [difficulty, setDifficulty] = useState<Difficulty>("easy")
@@ -31,6 +31,7 @@ export default function PostPage() {
   const [bargaining, setBargaining] = useState(false)
   const [batchMode, setBatchMode] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [batchCount, setBatchCount] = useState(0)
 
   const campusName = CAMPUSES.find(c => c.id === campusId)?.name || ""
   const buildings = campusId ? BUILDINGS[campusId] || [] : []
@@ -57,13 +58,19 @@ export default function PostPage() {
       id: `it${Date.now()}${i}`, orderId: "", furnitureType: item.furnitureType,
       difficulty: item.difficulty, description: item.description,
     }))
-    addOrder({
+    const orderId = addOrder({
       scenario, campus: campusName, building, leaveDate, deliveryMode,
       newAddress: deliveryMode === "deliver" ? newAddress : undefined,
       price: charity ? 0 : price, charity, urgent, bargaining, items: orderItems,
     })
-    initTodos(leaveDate)
-    if (batchMode) { setItems([]); setSelFurniture(""); setItemDesc(""); return }
+    initTodos(orderId, leaveDate)
+    if (batchMode) {
+      setBatchCount(prev => prev + 1)
+      setItems([])
+      setSelFurniture("")
+      setItemDesc("")
+      return
+    }
     setSubmitted(true)
     setTimeout(() => navigate("/progress"), 1200)
   }
@@ -81,8 +88,25 @@ export default function PostPage() {
   }
 
   return (
-    <div className="phone-frame pb-24">
-      <PageHeader title="发单" subtitle="发布你的家具转单信息" />
+    <div className="phone-frame pb-[120px]">
+      <PageHeader
+        title="发单"
+        subtitle="发布你的家具转单信息"
+        right={
+          <button
+            onClick={() => setCurrentUserAdmin(!currentUser.isAdmin)}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              currentUser.isAdmin
+                ? "bg-orange-primary/10 text-orange-primary"
+                : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+            }`}
+          >
+            <Shield size={12} />
+            {currentUser.isAdmin ? "管理员" : "管理员入口"}
+          </button>
+        }
+      />
+
       <div className="px-5 py-4 space-y-4">
         <motion.div {...SA} transition={{ delay: 0.05 }}>
           <div className="card">
@@ -155,7 +179,7 @@ export default function PostPage() {
             <input type="date" value={leaveDate} onChange={e => setLeaveDate(e.target.value)} className="input-field" />
             <AnimatePresence>
               {rule && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-1">
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-1 overflow-hidden">
                   <div className="flex items-center gap-1 text-amber-600 text-xs font-medium"><AlertTriangle size={12} /> 搬运须知</div>
                   <p className="text-xs text-slate-600">🕐 {rule.moveTimeLimit}</p>
                   <p className="text-xs text-slate-600">🚚 {rule.truckAccessTime}</p>
@@ -179,7 +203,7 @@ export default function PostPage() {
             </div>
             <AnimatePresence>
               {deliveryMode === "deliver" && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="mt-3">
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="mt-3 overflow-hidden">
                   <input value={newAddress} onChange={e => setNewAddress(e.target.value)} placeholder="输入新地址..." className="input-field" />
                 </motion.div>
               )}
@@ -215,6 +239,9 @@ export default function PostPage() {
                 <div className="flex items-center gap-2">
                   <Shield size={16} className="text-orange-primary" />
                   <span className="text-sm font-medium text-navy-primary">批量发单模式</span>
+                  {batchMode && batchCount > 0 && (
+                    <span className="tag bg-mint/15 text-mint">已添加 {batchCount} 单</span>
+                  )}
                 </div>
                 <button onClick={() => setBatchMode(!batchMode)} className={`w-11 h-6 rounded-full transition-colors relative ${batchMode ? "bg-orange-primary" : "bg-slate-200"}`}>
                   <motion.div animate={{ x: batchMode ? 20 : 2 }} className="w-5 h-5 bg-white rounded-full absolute top-0.5 shadow-sm" />
@@ -222,7 +249,7 @@ export default function PostPage() {
               </div>
               {batchMode && (
                 <button onClick={submitOrder} className="mt-3 w-full flex items-center justify-center gap-1 py-2 rounded-xl border-2 border-dashed border-orange-primary text-orange-primary text-sm font-medium">
-                  <Plus size={14} /> 添加订单
+                  <Plus size={14} /> 添加下一单
                 </button>
               )}
             </div>
@@ -230,8 +257,10 @@ export default function PostPage() {
         )}
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 max-w-[480px] mx-auto bg-white/90 backdrop-blur-md border-t border-slate-100 px-5 py-3 z-50">
-        <motion.button whileTap={{ scale: 0.97 }} onClick={submitOrder} className="btn-primary w-full">发布订单</motion.button>
+      <div className="fixed bottom-[56px] left-0 right-0 max-w-[480px] mx-auto bg-white/95 backdrop-blur-md border-t border-slate-100 px-5 py-3 z-40">
+        <motion.button whileTap={{ scale: 0.97 }} onClick={submitOrder} className="btn-primary w-full">
+          {batchMode ? "添加此单" : "发布订单"}
+        </motion.button>
       </div>
     </div>
   )

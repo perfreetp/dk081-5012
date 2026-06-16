@@ -195,7 +195,7 @@ export const MOCK_REVIEWS: Review[] = [
   },
 ]
 
-export const DEFAULT_TODOS: Omit<TodoItem, "id" | "userId">[] = [
+export const DEFAULT_TODOS: Omit<TodoItem, "id" | "userId" | "orderId">[] = [
   { leaveDate: "", content: "清理宿舍个人物品", done: false },
   { leaveDate: "", content: "归还图书证/校园卡", done: false },
   { leaveDate: "", content: "退宿手续签字", done: false },

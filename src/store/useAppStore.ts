@@ -2,14 +2,18 @@ import { create } from "zustand"
 import type { Order, GroupOrder, BargainMessage, Review, TodoItem, OrderItem } from "@/types"
 import { MOCK_ORDERS, MOCK_GROUP_ORDERS, MOCK_BARGAINS, MOCK_REVIEWS, CURRENT_USER, DEFAULT_TODOS } from "@/data/orders"
 
-interface AppState {
+const STORAGE_KEY = "banhaojia-store-v1"
+
+interface PersistedState {
   currentUser: typeof CURRENT_USER
   orders: Order[]
   groupOrders: GroupOrder[]
   bargains: BargainMessage[]
   reviews: Review[]
-  todos: TodoItem[]
+  todosByOrderId: Record<string, TodoItem[]>
+}
 
+interface AppState extends PersistedState {
   addOrder: (order: Omit<Order, "id" | "createdAt" | "handoverCode" | "userId" | "status">) => string
   updateOrderStatus: (orderId: string, status: Order["status"]) => void
   joinGroup: (groupOrderId: string, orderId: string) => void
@@ -17,11 +21,12 @@ interface AppState {
   confirmGroup: (groupOrderId: string) => void
   addBargain: (orderId: string, content: string, type: BargainMessage["type"]) => void
   addReview: (orderId: string, punctuality: number, campusFamiliarity: number, tags: string[]) => void
-  toggleTodo: (todoId: string) => void
-  initTodos: (leaveDate: string) => void
+  toggleTodo: (orderId: string, todoId: string) => void
+  initTodos: (orderId: string, leaveDate: string) => void
   setCurrentUserAdmin: (isAdmin: boolean) => void
   getUserOrders: () => Order[]
   getOrderByGroup: (groupOrderId: string) => Order[]
+  getTodosByOrder: (orderId: string) => TodoItem[]
 }
 
 const generateId = () => Math.random().toString(36).substring(2, 8)
@@ -32,13 +37,45 @@ const generateCode = () => {
   return code
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+const loadState = (): PersistedState | null => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+const savedState = loadState()
+
+const initialState: PersistedState = savedState || {
   currentUser: CURRENT_USER,
   orders: [...MOCK_ORDERS],
   groupOrders: [...MOCK_GROUP_ORDERS],
   bargains: [...MOCK_BARGAINS],
   reviews: [...MOCK_REVIEWS],
-  todos: [],
+  todosByOrderId: {},
+}
+
+const persist = (state: PersistedState) => {
+  try {
+    const toSave: PersistedState = {
+      currentUser: state.currentUser,
+      orders: state.orders,
+      groupOrders: state.groupOrders,
+      bargains: state.bargains,
+      reviews: state.reviews,
+      todosByOrderId: state.todosByOrderId,
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave))
+  } catch {
+  }
+}
+
+export const useAppStore = create<AppState>((set, get) => ({
+  ...initialState,
 
   addOrder: (orderData) => {
     const id = `ord${generateId()}`
@@ -51,31 +88,45 @@ export const useAppStore = create<AppState>((set, get) => ({
       handoverCode,
       createdAt: new Date().toISOString(),
     }
-    set((state) => ({ orders: [...state.orders, newOrder] }))
+    set((state) => {
+      const next = { ...state, orders: [...state.orders, newOrder] }
+      persist(next)
+      return next
+    })
     return id
   },
 
   updateOrderStatus: (orderId, status) => {
-    set((state) => ({
-      orders: state.orders.map((o) => (o.id === orderId ? { ...o, status } : o)),
-    }))
+    set((state) => {
+      const next = {
+        ...state,
+        orders: state.orders.map((o) => (o.id === orderId ? { ...o, status } : o)),
+      }
+      persist(next)
+      return next
+    })
   },
 
   joinGroup: (groupOrderId, orderId) => {
-    set((state) => ({
-      groupOrders: state.groupOrders.map((g) =>
-        g.id === groupOrderId
-          ? {
-              ...g,
-              memberCount: g.memberCount + 1,
-              orderIds: [...g.orderIds, orderId],
-            }
-          : g
-      ),
-      orders: state.orders.map((o) =>
-        o.id === orderId ? { ...o, groupOrderId, status: "grouped" as const } : o
-      ),
-    }))
+    set((state) => {
+      const next = {
+        ...state,
+        groupOrders: state.groupOrders.map((g) =>
+          g.id === groupOrderId
+            ? {
+                ...g,
+                memberCount: g.memberCount + 1,
+                orderIds: [...g.orderIds, orderId],
+              }
+            : g
+        ),
+        orders: state.orders.map((o) =>
+          o.id === orderId ? { ...o, groupOrderId, status: "grouped" as const } : o
+        ),
+      }
+      persist(next)
+      return next
+    })
   },
 
   createGroup: (date, area) => {
@@ -90,19 +141,28 @@ export const useAppStore = create<AppState>((set, get) => ({
       status: "forming",
       orderIds: [],
     }
-    set((state) => ({ groupOrders: [...state.groupOrders, newGroup] }))
+    set((state) => {
+      const next = { ...state, groupOrders: [...state.groupOrders, newGroup] }
+      persist(next)
+      return next
+    })
     return id
   },
 
   confirmGroup: (groupOrderId) => {
-    set((state) => ({
-      groupOrders: state.groupOrders.map((g) =>
-        g.id === groupOrderId ? { ...g, status: "confirmed" as const } : g
-      ),
-      orders: state.orders.map((o) =>
-        o.groupOrderId === groupOrderId ? { ...o, status: "delivering" as const } : o
-      ),
-    }))
+    set((state) => {
+      const next = {
+        ...state,
+        groupOrders: state.groupOrders.map((g) =>
+          g.id === groupOrderId ? { ...g, status: "confirmed" as const } : g
+        ),
+        orders: state.orders.map((o) =>
+          o.groupOrderId === groupOrderId ? { ...o, status: "delivering" as const } : o
+        ),
+      }
+      persist(next)
+      return next
+    })
   },
 
   addBargain: (orderId, content, type) => {
@@ -115,7 +175,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       type,
       createdAt: new Date().toISOString(),
     }
-    set((state) => ({ bargains: [...state.bargains, msg] }))
+    set((state) => {
+      const next = { ...state, bargains: [...state.bargains, msg] }
+      persist(next)
+      return next
+    })
   },
 
   addReview: (orderId, punctuality, campusFamiliarity, tags) => {
@@ -128,29 +192,54 @@ export const useAppStore = create<AppState>((set, get) => ({
       tags,
       createdAt: new Date().toISOString(),
     }
-    set((state) => ({ reviews: [...state.reviews, review] }))
+    set((state) => {
+      const next = { ...state, reviews: [...state.reviews, review] }
+      persist(next)
+      return next
+    })
   },
 
-  toggleTodo: (todoId) => {
-    set((state) => ({
-      todos: state.todos.map((t) => (t.id === todoId ? { ...t, done: !t.done } : t)),
-    }))
+  toggleTodo: (orderId, todoId) => {
+    set((state) => {
+      const orderTodos = state.todosByOrderId[orderId] || []
+      const updated = orderTodos.map((t) =>
+        t.id === todoId ? { ...t, done: !t.done } : t
+      )
+      const next = {
+        ...state,
+        todosByOrderId: { ...state.todosByOrderId, [orderId]: updated },
+      }
+      persist(next)
+      return next
+    })
   },
 
-  initTodos: (leaveDate) => {
+  initTodos: (orderId, leaveDate) => {
     const userId = get().currentUser.id
     const todos: TodoItem[] = DEFAULT_TODOS.map((t, i) => ({
-      id: `todo${i + 1}`,
+      id: `todo-${orderId}-${i + 1}`,
       userId,
+      orderId,
       leaveDate,
       content: t.content,
       done: false,
     }))
-    set({ todos })
+    set((state) => {
+      const next = {
+        ...state,
+        todosByOrderId: { ...state.todosByOrderId, [orderId]: todos },
+      }
+      persist(next)
+      return next
+    })
   },
 
   setCurrentUserAdmin: (isAdmin) => {
-    set((state) => ({ currentUser: { ...state.currentUser, isAdmin } }))
+    set((state) => {
+      const next = { ...state, currentUser: { ...state.currentUser, isAdmin } }
+      persist(next)
+      return next
+    })
   },
 
   getUserOrders: () => {
@@ -160,5 +249,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   getOrderByGroup: (groupOrderId) => {
     return get().orders.filter((o) => o.groupOrderId === groupOrderId)
+  },
+
+  getTodosByOrder: (orderId) => {
+    return get().todosByOrderId[orderId] || []
   },
 }))

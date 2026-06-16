@@ -21,12 +21,13 @@ function getCountdown(leaveDate: string) {
 }
 
 function OrderDetail({ order }: { order: Order }) {
-  const { todos, reviews, initTodos } = useAppStore()
+  const { reviews, initTodos, getTodosByOrder } = useAppStore()
   const [expanded, setExpanded] = useState(true)
   const [copied, setCopied] = useState(false)
 
   const hasReview = reviews.some((r) => r.orderId === order.id)
   const showHandover = order.status === "delivering" || order.status === "completed"
+  const todos = getTodosByOrder(order.id)
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(order.handoverCode)
@@ -147,11 +148,11 @@ function OrderDetail({ order }: { order: Order }) {
         <div className="card">
           <h3 className="section-title">离校待办清单</h3>
           {todos.length === 0 ? (
-            <button onClick={() => initTodos(order.leaveDate)} className="btn-primary w-full text-sm">
+            <button onClick={() => initTodos(order.id, order.leaveDate)} className="btn-primary w-full text-sm">
               生成待办清单
             </button>
           ) : (
-            <TodoList />
+            <TodoList orderId={order.id} />
           )}
         </div>
 
