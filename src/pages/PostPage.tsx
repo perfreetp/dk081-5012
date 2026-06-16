@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { AlertTriangle, ChevronDown, Camera, Shield, Package, Plus, Trash2, Users } from "lucide-react"
+import { AlertTriangle, ChevronDown, Camera, Shield, Package, Plus, Trash2, User, Phone, CheckCircle } from "lucide-react"
 import type { Scenario, DeliveryMode, Difficulty, OrderItem } from "@/types"
 import { FURNITURE_TYPES, DIFFICULTY_LABELS, DELIVERY_LABELS } from "@/types"
 import { useAppStore } from "@/store/useAppStore"
@@ -31,7 +31,10 @@ export default function PostPage() {
   const [bargaining, setBargaining] = useState(false)
   const [batchMode, setBatchMode] = useState(false)
   const [submitted, setSubmitted] = useState(false)
-  const [batchCount, setBatchCount] = useState(0)
+  const [batchOrders, setBatchOrders] = useState<Array<{ id: string; studentName: string; studentPhone: string; building: string; campus: string }>>([])
+  const [studentName, setStudentName] = useState("")
+  const [studentPhone, setStudentPhone] = useState("")
+  const [showItemHint, setShowItemHint] = useState(false)
 
   const campusName = CAMPUSES.find(c => c.id === campusId)?.name || ""
   const buildings = campusId ? BUILDINGS[campusId] || [] : []
@@ -48,29 +51,69 @@ export default function PostPage() {
     setItems(prev => [...prev, { furnitureType: selFurniture, difficulty, description: itemDesc }])
     setSelFurniture("")
     setItemDesc("")
+    setShowItemHint(false)
   }
 
   const removeItem = (idx: number) => setItems(prev => prev.filter((_, i) => i !== idx))
 
+  const autoAddPendingItem = () => {
+    if (selFurniture) {
+      addItem()
+      return true
+    }
+    return false
+  }
+
+  const resetItemSection = () => {
+    setItems([])
+    setSelFurniture("")
+    setItemDesc("")
+  }
+
   const submitOrder = () => {
-    if (!scenario || !items.length || !campusName || !building || !leaveDate) return
-    const orderItems: OrderItem[] = items.map((item, i) => ({
+    if (!scenario) return
+    if (!campusName || !building || !leaveDate) return
+
+    if (items.length === 0 && !selFurniture) {
+      setShowItemHint(true)
+      return
+    }
+
+    const finalItems = [...items]
+    if (selFurniture && items.length === 0) {
+      finalItems.push({ furnitureType: selFurniture, difficulty, description: itemDesc })
+    }
+
+    if (finalItems.length === 0) {
+      setShowItemHint(true)
+      return
+    }
+
+    if (batchMode) {
+      if (!studentName.trim()) return
+    }
+
+    const orderItems: OrderItem[] = finalItems.map((item, i) => ({
       id: `it${Date.now()}${i}`, orderId: "", furnitureType: item.furnitureType,
       difficulty: item.difficulty, description: item.description,
     }))
+
     const orderId = addOrder({
       scenario, campus: campusName, building, leaveDate, deliveryMode,
       newAddress: deliveryMode === "deliver" ? newAddress : undefined,
       price: charity ? 0 : price, charity, urgent, bargaining, items: orderItems,
+      ...(batchMode && { studentName, studentPhone, userId: `stu_${Date.now()}` }),
     })
     initTodos(orderId, leaveDate)
+
     if (batchMode) {
-      setBatchCount(prev => prev + 1)
-      setItems([])
-      setSelFurniture("")
-      setItemDesc("")
+      setBatchOrders(prev => [...prev, { id: orderId, studentName, studentPhone, building, campus: campusName }])
+      resetItemSection()
+      setStudentName("")
+      setStudentPhone("")
       return
     }
+
     setSubmitted(true)
     setTimeout(() => navigate("/progress"), 1200)
   }
@@ -94,7 +137,13 @@ export default function PostPage() {
         subtitle="发布你的家具转单信息"
         right={
           <button
-            onClick={() => setCurrentUserAdmin(!currentUser.isAdmin)}
+            onClick={() => {
+              setCurrentUserAdmin(!currentUser.isAdmin)
+              if (currentUser.isAdmin) {
+                setBatchMode(false)
+                setBatchOrders([])
+              }
+            }}
             className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
               currentUser.isAdmin
                 ? "bg-orange-primary/10 text-orange-primary"
@@ -108,7 +157,58 @@ export default function PostPage() {
       />
 
       <div className="px-5 py-4 space-y-4">
-        <motion.div {...SA} transition={{ delay: 0.05 }}>
+        {batchMode && batchOrders.length > 0 && (
+          <motion.div {...SA} transition={{ delay: 0.02 }}>
+            <div className="card bg-mint/5 border-mint/30">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-navy-primary">已批量添加 {batchOrders.length} 单</span>
+                <button onClick={() => navigate("/progress")} className="text-xs text-orange-primary font-medium">
+                  查看全部 →
+                </button>
+              </div>
+              <div className="space-y-1.5 max-h-28 overflow-y-auto">
+                {batchOrders.map((o) => (
+                  <div key={o.id} className="flex items-center gap-2 text-xs text-slate-600">
+                    <CheckCircle size={12} className="text-mint shrink-0" />
+                    <span className="font-medium">{o.studentName}</span>
+                    <span className="text-slate-400">·</span>
+                    <span className="truncate">{o.campus} {o.building}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {currentUser.isAdmin && batchMode && (
+          <motion.div {...SA} transition={{ delay: 0.04 }}>
+            <div className="card">
+              <h3 className="section-title">学生信息</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="relative">
+                  <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={studentName}
+                    onChange={e => setStudentName(e.target.value)}
+                    placeholder="学生姓名"
+                    className="input-field pl-8"
+                  />
+                </div>
+                <div className="relative">
+                  <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={studentPhone}
+                    onChange={e => setStudentPhone(e.target.value)}
+                    placeholder="手机号"
+                    className="input-field pl-8"
+                  />
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        <motion.div {...SA} transition={{ delay: 0.06 }}>
           <div className="card">
             <h3 className="section-title">选择场景</h3>
             <div className="flex gap-3">
@@ -127,6 +227,7 @@ export default function PostPage() {
                 <FurnitureTag key={f.label} label={f.label} emoji={f.emoji} selected={selFurniture === f.label} onClick={() => selectFurniture(f.label)} />
               ))}
             </div>
+
             {selFurniture && (
               <div className="mt-3 space-y-2">
                 <p className="text-xs text-slate-400">上床下桌→难 · 组合柜→难 · 铁架床→中 · 普通桌椅→易</p>
@@ -139,22 +240,45 @@ export default function PostPage() {
                 </div>
                 <textarea value={itemDesc} onChange={e => setItemDesc(e.target.value)} placeholder="描述物品状况..." className="input-field resize-none h-16" />
                 <div className="flex items-center gap-3">
-                  <button onClick={addItem} className="flex items-center gap-1 text-sm text-orange-primary font-medium"><Plus size={14} /> 添加物品</button>
+                  <button onClick={addItem} className="flex items-center gap-1 text-sm text-orange-primary font-medium"><Plus size={14} /> 添加到清单</button>
                   <button className="flex items-center gap-1 text-sm text-slate-400"><Camera size={14} /> 拍照</button>
                 </div>
               </div>
             )}
+
             <AnimatePresence>
-              {items.map((item, idx) => (
-                <motion.div key={idx} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-navy-primary">{item.furnitureType}</span>
-                    <DifficultyBadge difficulty={item.difficulty} />
-                    {item.description && <span className="text-xs text-slate-400 truncate max-w-[120px]">{item.description}</span>}
-                  </div>
-                  <button onClick={() => removeItem(idx)} className="text-rose"><Trash2 size={14} /></button>
+              {items.length > 0 && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="mt-3 overflow-hidden">
+                  <p className="text-xs text-slate-400 mb-2">已添加 {items.length} 件物品</p>
+                  {items.map((item, idx) => (
+                    <div key={idx} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-navy-primary">{item.furnitureType}</span>
+                        <DifficultyBadge difficulty={item.difficulty} />
+                        {item.description && <span className="text-xs text-slate-400 truncate max-w-[100px]">{item.description}</span>}
+                      </div>
+                      <button onClick={() => removeItem(idx)} className="text-rose"><Trash2 size={14} /></button>
+                    </div>
+                  ))}
                 </motion.div>
-              ))}
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {showItemHint && items.length === 0 && (
+                <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="mt-3 bg-honey/15 border border-honey/40 rounded-xl p-2.5">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                    <div className="flex-1 text-xs text-amber-700">
+                      <p className="font-medium">还没添加物品哦</p>
+                      <p className="mt-0.5">选好家具后记得点「添加到清单」</p>
+                      <button onClick={addItem} className="mt-2 text-orange-primary font-medium" disabled={!selFurniture}>
+                        {selFurniture ? `添加「${selFurniture}」→` : "请先选择家具类型"}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
             </AnimatePresence>
           </div>
         </motion.div>
@@ -239,19 +363,18 @@ export default function PostPage() {
                 <div className="flex items-center gap-2">
                   <Shield size={16} className="text-orange-primary" />
                   <span className="text-sm font-medium text-navy-primary">批量发单模式</span>
-                  {batchMode && batchCount > 0 && (
-                    <span className="tag bg-mint/15 text-mint">已添加 {batchCount} 单</span>
+                  {batchMode && batchOrders.length > 0 && (
+                    <span className="tag bg-mint/15 text-mint">{batchOrders.length}单</span>
                   )}
                 </div>
-                <button onClick={() => setBatchMode(!batchMode)} className={`w-11 h-6 rounded-full transition-colors relative ${batchMode ? "bg-orange-primary" : "bg-slate-200"}`}>
+                <button onClick={() => {
+                  setBatchMode(!batchMode)
+                  if (batchMode) setBatchOrders([])
+                }} className={`w-11 h-6 rounded-full transition-colors relative ${batchMode ? "bg-orange-primary" : "bg-slate-200"}`}>
                   <motion.div animate={{ x: batchMode ? 20 : 2 }} className="w-5 h-5 bg-white rounded-full absolute top-0.5 shadow-sm" />
                 </button>
               </div>
-              {batchMode && (
-                <button onClick={submitOrder} className="mt-3 w-full flex items-center justify-center gap-1 py-2 rounded-xl border-2 border-dashed border-orange-primary text-orange-primary text-sm font-medium">
-                  <Plus size={14} /> 添加下一单
-                </button>
-              )}
+              <p className="text-xs text-slate-400 mt-2">开启后可连续为多名学生代发订单，每单需填写学生信息</p>
             </div>
           </motion.div>
         )}
@@ -259,7 +382,7 @@ export default function PostPage() {
 
       <div className="fixed bottom-[56px] left-0 right-0 max-w-[480px] mx-auto bg-white/95 backdrop-blur-md border-t border-slate-100 px-5 py-3 z-40">
         <motion.button whileTap={{ scale: 0.97 }} onClick={submitOrder} className="btn-primary w-full">
-          {batchMode ? "添加此单" : "发布订单"}
+          {batchMode ? "添加此单到批次" : "发布订单"}
         </motion.button>
       </div>
     </div>

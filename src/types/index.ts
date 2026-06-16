@@ -17,6 +17,8 @@ export interface OrderItem {
 export interface Order {
   id: string
   userId: string
+  studentName?: string
+  studentPhone?: string
   scenario: Scenario
   campus: string
   building: string

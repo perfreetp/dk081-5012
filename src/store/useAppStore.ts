@@ -14,19 +14,23 @@ interface PersistedState {
 }
 
 interface AppState extends PersistedState {
-  addOrder: (order: Omit<Order, "id" | "createdAt" | "handoverCode" | "userId" | "status">) => string
+  addOrder: (order: Omit<Order, "id" | "createdAt" | "handoverCode" | "status"> & { userId?: string }) => string
   updateOrderStatus: (orderId: string, status: Order["status"]) => void
   joinGroup: (groupOrderId: string, orderId: string) => void
   createGroup: (date: string, area: string) => string
   confirmGroup: (groupOrderId: string) => void
+  mergeOrdersToGroup: (groupOrderId: string, orderIds: string[]) => void
   addBargain: (orderId: string, content: string, type: BargainMessage["type"]) => void
   addReview: (orderId: string, punctuality: number, campusFamiliarity: number, tags: string[]) => void
   toggleTodo: (orderId: string, todoId: string) => void
   initTodos: (orderId: string, leaveDate: string) => void
   setCurrentUserAdmin: (isAdmin: boolean) => void
   getUserOrders: () => Order[]
+  getAllOrders: () => Order[]
   getOrderByGroup: (groupOrderId: string) => Order[]
   getTodosByOrder: (orderId: string) => TodoItem[]
+  getPendingOrdersByDateAndCampus: (date: string, campus: string) => Order[]
+  getRecommendedGroupsForOrder: (orderId: string) => GroupOrder[]
 }
 
 const generateId = () => Math.random().toString(36).substring(2, 8)
@@ -83,7 +87,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newOrder: Order = {
       ...orderData,
       id,
-      userId: get().currentUser.id,
+      userId: orderData.userId || get().currentUser.id,
       status: "pending",
       handoverCode,
       createdAt: new Date().toISOString(),
@@ -122,6 +126,36 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
         orders: state.orders.map((o) =>
           o.id === orderId ? { ...o, groupOrderId, status: "grouped" as const } : o
+        ),
+      }
+      persist(next)
+      return next
+    })
+  },
+
+  mergeOrdersToGroup: (groupOrderId, orderIds) => {
+    set((state) => {
+      const group = state.groupOrders.find((g) => g.id === groupOrderId)
+      if (!group) return state
+      const validIds = orderIds.filter((oid) => {
+        const order = state.orders.find((o) => o.id === oid)
+        return order && order.status === "pending" && !order.groupOrderId
+      })
+      const next = {
+        ...state,
+        groupOrders: state.groupOrders.map((g) =>
+          g.id === groupOrderId
+            ? {
+                ...g,
+                memberCount: g.memberCount + validIds.length,
+                orderIds: [...g.orderIds, ...validIds],
+              }
+            : g
+        ),
+        orders: state.orders.map((o) =>
+          validIds.includes(o.id)
+            ? { ...o, groupOrderId, status: "grouped" as const }
+            : o
         ),
       }
       persist(next)
@@ -215,7 +249,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   initTodos: (orderId, leaveDate) => {
-    const userId = get().currentUser.id
+    const order = get().orders.find((o) => o.id === orderId)
+    const userId = order?.userId || get().currentUser.id
     const todos: TodoItem[] = DEFAULT_TODOS.map((t, i) => ({
       id: `todo-${orderId}-${i + 1}`,
       userId,
@@ -247,11 +282,33 @@ export const useAppStore = create<AppState>((set, get) => ({
     return get().orders.filter((o) => o.userId === userId)
   },
 
+  getAllOrders: () => {
+    return get().orders
+  },
+
   getOrderByGroup: (groupOrderId) => {
     return get().orders.filter((o) => o.groupOrderId === groupOrderId)
   },
 
   getTodosByOrder: (orderId) => {
     return get().todosByOrderId[orderId] || []
+  },
+
+  getPendingOrdersByDateAndCampus: (date, campus) => {
+    return get().orders.filter(
+      (o) => o.leaveDate === date && o.campus === campus && o.status === "pending"
+    )
+  },
+
+  getRecommendedGroupsForOrder: (orderId) => {
+    const order = get().orders.find((o) => o.id === orderId)
+    if (!order) return []
+    return get().groupOrders.filter(
+      (g) =>
+        g.date === order.leaveDate &&
+        g.area === order.campus &&
+        g.status === "forming" &&
+        g.memberCount < g.maxCapacity
+    )
   },
 }))
